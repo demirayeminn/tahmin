@@ -1,0 +1,310 @@
+Stok Talep Tahmin & Alarm Sistemi — Yönetici Özeti ve Mimari Genel Bakış
+Tarih: 2026-03-02
+
+======================================================================
+1) YÖNETİCİ ÖZETİ — SİSTEM NE YAPIYOR?
+======================================================================
+
+- Amaç:
+  - Geçmiş sipariş verisinden ürün (barkod) bazlı talep tahmini üretmek,
+  - Satın alma ekibine “ne, ne kadar, ne zaman alınmalı?” sorusuna otomatik cevap vermek,
+  - Birlikte satılan ürünleri tespit edip çapraz satış / bundle fırsatları önermek,
+  - Satış serilerindeki olağan dışı günleri (kampanya, stok-out vb.) tespit etmek,
+  - Entegra API’den gelen canlı stok ve fiyat bilgisiyle kritik stok seviyelerini izlemek,
+  - Telegram ve e-posta üzerinden otomatik alarm ve özet raporlar göndermek,
+  - Tüm bunları Streamlit tabanlı interaktif bir dashboard üzerinden yöneticiye sunmak.
+
+- Yüksek seviye akış:
+  1) Ham sipariş verisi (Excel) okunur, temizlenir ve ürün master tablosu oluşturulur.
+  2) Ürünler ABC, talep tipi ve sağlık skoruna göre segmentlere ayrılır.
+  3) Talep tipine göre seçilen modellerle ileriye dönük tahminler üretilir.
+  4) Tahmin + mevcut stok kullanılarak satın alma önerileri ve kalan gün hesaplanır.
+  5) Anomali analizi ile kampanya benzeri / stok-out benzeri olağan dışı günler bulunur.
+  6) Sepet analizi ile birlikte satılan ürün kuralları (FP-Growth) çıkarılır.
+  7) Entegra API’den canlı stok, fiyat, kategori ve marka verisi çekilip tüm tablolar zenginleştirilir.
+  8) Alarm motoru ürün bazında “kaç gün sonra stoğu bitecek?” sorusuna cevap üretir.
+  9) Kritik ve uyarı seviyesindeki ürünler için Telegram ve e-posta bildirimleri gönderilir.
+ 10) Yönetici ve operasyon ekibi tüm sonuçları dashboard’taki 6 sayfadan takip eder.
+
+
+======================================================================
+2) TEKNOLOJİ YIĞINI VE ANA BİLEŞENLER
+======================================================================
+
+- Dil ve paketler:
+  - Python 3.10+
+  - pandas, numpy, scipy, statsmodels, scikit-learn (bazı modeller),
+    mlxtend (FP-Growth), pyarrow, openpyxl/xlsxwriter,
+    streamlit, plotly, schedule, requests, python-dotenv,
+    python-telegram-bot>=20.0
+
+- Uygulama katmanları:
+  - Veri katmanı:
+    - Ham veri: `veri/siparisler.xlsx` (SADECE OKUMA)
+    - İşlenmiş veri: `data/processed/*.parquet`
+    - Raporlar: `data/outputs/*.xlsx`
+  - İş mantığı katmanı (`src/`):
+    - Veri hazırlama, segmentasyon, tahmin, satın alma, anomali, birlikte satış,
+      Entegra entegrasyonu, zenginleştirme, alarm, bildirim, zamanlayıcı.
+  - Sunum katmanı (`dashboard/`):
+    - Streamlit dashboard, 6 sayfa: Yönetici Özeti, Talep Analizi,
+      Birlikte Satış, Stok Planlama, Anomali, Alarm.
+
+- Konfigürasyon ve gizli bilgiler:
+  - Merkezi konfigürasyon: `src/config.py`
+    - Magic number yok; tüm eşikler, hedef gün, alarm seviyeleri, scheduler saatleri vb. burada.
+  - Credential yönetimi:
+    - `.env.example` → `.env` (kullanıcı doldurur, git’e eklenmez)
+    - Entegra, Telegram, SMTP bilgileri `.env` üzerinden okunur.
+
+
+======================================================================
+3) VERİ KAYNAKLARI, TABLOLAR VE VERİ AKIŞI
+======================================================================
+
+3.1) Ham veri (girdi)
+---------------------
+- Dosya: `veri/siparisler.xlsx`
+- Kolonlar:
+  - Tarih
+  - Sipariş Numarası (aynı numara = aynı sepet)
+  - Ürün Fatura İsmi (aynı barkod farklı isimlerle gelebilir)
+  - Adet (negatif = iade)
+  - Barkod (ürünün gerçek kimliği; tüm analiz barkod üstünden)
+
+- Kritik kural:
+  - Ürün = Barkod.
+  - Kanonik ad = aynı barkod için en sık görülen ürün ismi.
+
+3.2) Ana çıktı tabloları (T1–T8 konsepti)
+----------------------------------------
+- T1 — Ürün Master (`data/processed/product_master.parquet`):
+  - Barkod, kanonik ad, alias listesi, alias sayısı,
+  - İlk/son satış tarihi, toplam adet, toplam sipariş,
+  - Günlük ortalama adet, ABC sınıfı (adet bazlı),
+  - Talep tipi, SKU sağlık skoru,
+  - Entegra’dan gelen mevcut stok, alış fiyatı, kategori, marka, ABC_ciro, kalan gün.
+
+- T2 — Günlük Talep (`data/processed/daily_demand.parquet`):
+  - Barkod, tarih, adet, kümülatif adet, hafta içi/sonu, hafta/ay kolonları.
+
+- T3 — Tahmin (`data/processed/forecast_results.parquet`):
+  - Barkod, tarih, tahmin adet, alt/üst band, kullanılan model, horizon (14/30/60 gün).
+
+- T4 — Satın Alma Önerisi (`data/processed/reorder.parquet`):
+  - Mevcut stok, günlük ortalama talep, hedef gün, güvenlik stoku,
+  - Önerilen sipariş miktarı, beklenen tükenme günü, risk bandı.
+
+- T5 — Birlikte Satış (`data/processed/basket_rules.parquet`):
+  - Ürün çiftleri (A/B), support, confidence, lift, sepet sayısı, aksiyon önerileri.
+
+- T6 — Anomali/Olay (`data/processed/anomaly_events.parquet`):
+  - Barkod, kanonik ad, tarih aralığı, olay tipi, şiddet, olası açıklama, güven seviyesi.
+
+- T7 — Aykırı Günler Takvimi (`data/processed/anomaly_calendar.parquet`):
+  - Tarih, etkilenen SKU sayısı, olay tipleri, toplam anomali adedi.
+
+- T8 — Alarm Listesi (`data/processed/alarms.parquet`):
+  - Barkod, kanonik ad, ABC, kategori, marka,
+  - Mevcut stok, günlük tahmin, kalan gün,
+  - Alarm seviyesi (kritik/uyarı/izle), önerilen sipariş, son güncelleme.
+
+3.3) Uçtan uca veri akışı (pipeline)
+------------------------------------
+- Adım 1 — Veri Temizleme (`python -m src.data_loader`):
+  - Excel okuma, tarih parse, barkod normalize, kanonik ad ve alias’lar,
+  - `clean_orders.parquet` ve `daily_demand.parquet` üretimi.
+
+- Adım 2 — Segmentasyon (`python -m src.segmentation`):
+  - ABC (adet bazlı), talep tipi (CV/ADI), SKU sağlık skoru,
+  - `product_master.parquet` oluşturulur.
+
+- Adım 3 — Özellik & Tahmin (`python -m src.feature_engine`, `python -m src.forecasting`):
+  - Lag/rolling/takvim özellikleri,
+  - Tahmin modelleri + backtest, horizon bazlı tahmin çıktıları.
+
+- Adım 4 — Satın Alma (`python -m src.reorder`):
+  - Hedef stok ve güvenlik stoku,
+  - Kalan gün ve önerilen sipariş hesaplanır.
+
+- Adım 5 — Anomali (`python -m src.anomaly`):
+  - Spike/düşüş, zero-sales run, trend kırılması, kampanya proxy,
+  - Olay ve takvim tabloları.
+
+- Adım 6 — Birlikte Satış (`python -m src.basket_analysis`):
+  - FP-Growth ile sepet kuralları.
+
+- Adım 7 — Entegra + Alarm (`python -m src.scheduler --once`):
+  - Canlı stok/fiyat/kategori/marka çekilir,
+  - Master ve satın alma tabloları zenginleştirilir,
+  - Alarm motoru çalışır, `alarms.parquet` güncellenir,
+  - Kritik alarmlar notifier’a iletilir.
+
+
+======================================================================
+4) MODÜLLER (SRC/) — HANGİ DOSYA NE İŞ YAPIYOR?
+======================================================================
+
+- `config.py`:
+  - Tüm sabitler, eşikler, hedef gün, servis seviyeleri, alarm eşikleri,
+    scheduler saatleri, minimum support vb. burada tutulur.
+  - `.env` üzerinden Entegra, Telegram, SMTP credential’larını okur.
+
+- `data_loader.py`:
+  - Ham Excel’den veri okur, sütun isimlerini standardize eder,
+  - Tarih formatlarını düzeltir, barkodu normalize eder,
+  - Kanonik ad ve alias listelerini hesaplar,
+  - Günlük talep tablosunu üretir.
+
+- `segmentation.py`:
+  - ABC segmentasyonu (adet), talep tipi sınıflaması ve SKU sağlık skorunu hesaplar.
+
+- `feature_engine.py`:
+  - Tahmin modelleri için lag/rolling/takvim özelliklerini hazırlar.
+
+- `forecasting.py`:
+  - Talep tipine göre uygun model ailesini seçer (ETS / Holt-Winters / Croston / TSB / MA),
+  - Backtest ile modelleri kıyaslar ve en iyi modeli seçip ileri tahmin üretir.
+
+- `reorder.py`:
+  - `hedef_stok = günlük_ort × hedef_gün + güvenlik_stoğu` formülüyle çalışır,
+  - ABC sınıfına göre farklı servis seviyeleri uygular,
+  - Entegra’dan gelen mevcut stokla gerçekçi öneriler hesaplar.
+
+- `anomaly.py`:
+  - Z-score, rolling band, zero-sales run, change point yöntemleriyle anomalileri tespit eder,
+  - Olası stok-out ve kampanya benzeri günleri işaretler.
+
+- `basket_analysis.py`:
+  - Sipariş numarasını sepet kabul edip FP-Growth ile birlikte satış kuralları üretir,
+  - Support/confidence/lift hesaplar, aksiyon önerileri çıkarır.
+
+- `export.py`:
+  - Faz bazlı Excel raporlarını (`faz1_...xlsx` vb.) üretir.
+
+- `entegra_api.py`:
+  - Entegra API’ye JWT ile bağlanır, token’ı cache’ler,
+  - Paginated ürün sayfalarını çekip `entegra_products.parquet` üretir,
+  - İki farklı endpoint ismi hatasını (`productList` / `porductList`) özel olarak handle eder,
+  - Barkod normalize eder, Retry + bekleme (rate limit uyumu) uygular.
+
+- `enrichment.py`:
+  - `product_master` ile Entegra ürün listesini barkod üzerinden JOIN eder,
+  - Mevcut stok, alış fiyatı, kategori, marka, ABC_ciro vb. alanları ekler,
+  - Eşleşmeyen barkodları ve satışı olmayan stokları ayrıca işaretler.
+
+- `alarm.py`:
+  - `kalan_gun = mevcut_stok / günlük_tahmin_talep` formülüyle kalan günü hesaplar,
+  - ABC sınıfına göre farklı kritik/uyarı/izle eşiklerini uygular,
+  - Stok=0 ve ürün aktif ise özel “stok bitmiş” durumu üretir,
+  - Sonuçları `alarms.parquet` (T8) olarak kaydeder.
+
+- `notifier.py`:
+  - Telegram ve e-posta üzerinden bildirim gönderir,
+  - 🔴 Kritik alarmlar için anlık, 🟠 Uyarı için günlük özet mantığı vardır,
+  - Flood koruması: Aynı barkod için 12 saat içinde tekrar bildirim göndermez,
+  - E-posta tarafında HTML tablo formatında günlük özet rapor üretir.
+
+- `scheduler.py`:
+  - `schedule` kütüphanesiyle günde 3 kez (08:00, 14:00, 20:00) çalışacak işleri planlar,
+  - Her tetiklemede:
+    1) Entegra’dan stok/fiyat verisini çeker,
+    2) Zenginleştirme (enrichment) çalıştırır,
+    3) Alarm motorunu koşturur,
+    4) Kritik alarmları notifier’a iletir,
+    5) Özet bir log kaydı yazar.
+  - `--once` parametresiyle tek seferlik “cron tarzı” çalışma desteği vardır.
+
+
+======================================================================
+5) DASHBOARD (STREAMLIT) SAYFALARI VE ÖZELLİKLER
+======================================================================
+
+- Genel:
+  - Tüm sayfalarda ortak sidebar filtreleri:
+    - ABC sınıfı, kategori, marka, serbest metin ürün arama.
+  - Tüm grafikler Plotly ile interaktif; hover, zoom vb. destekli.
+
+- `01_yonetici_ozet.py`:
+  - En kritik KPI’lar (SKU sayısı, A/B/C dağılımı, sağlık skoru dağılımı),
+  - Top 20 ürün (örneğin satış/adet bazlı),
+  - ABC pasta grafiği, son 6 ay trendi, sağlık skoru histogramı.
+
+- `02_talep_analizi.py`:
+  - Ürün seçici ile tekil SKU detay inceleme,
+  - Günlük satış + tahmin grafiği (14/30/60 gün),
+  - Hareketli ortalamalar, haftalık/aylık agregasyon ve hafta içi/sonu kırılımı.
+
+- `03_birlikte_satis.py`:
+  - Seçilen ürün için top N birlikte satış kuralı,
+  - Support/confidence/lift tabloları,
+  - “Beraber stokla / bundle yap” gibi aksiyon önerileri.
+
+- `04_stok_planlama.py`:
+  - Hedef gün slider’ı (ör. 30–90),
+  - Önerilen sipariş, kalan gün ve risk bandı tablosu,
+  - “X stokla kaç gün gider?” tarzı hesaplayıcı fonksiyonlar.
+
+- `05_anomali.py`:
+  - Ürün ve tarih filtresiyle anomali olay listesi,
+  - Detay grafikler (anomali günleri işaretli zaman serisi),
+  - Stok-out aday listesi ve aykırı günler ısı haritası.
+
+- `06_alarm.py`:
+  - Sayaçlar:
+    - 🔴 Kritik (≤ A/B/C sınıfına göre tanımlı gün),
+    - 🟠 Uyarı,
+    - 🟡 İzle.
+  - Renk kodlu alarm tablosu (T8),
+  - Her satırda önerilen sipariş miktarı ve kalan gün bilgisi,
+  - Filtreler: ABC, kategori, marka, alarm seviyesi,
+  - Excel indirme butonu (alarm tablosunu dışa aktarma),
+  - “Son güncelleme” damgası: Entegra verisinin ne zaman çekildiğini gösterir.
+
+
+======================================================================
+6) GİZLİ / ARKA PLAN ÖZELLİKLERİ (KULLANICIDAN ÇOĞUNLUKLA GİZLİ)
+======================================================================
+
+- Flood koruması:
+  - Telegram ve e-posta bildirimlerinde aynı barkod için 12 saat içinde tekrar alarm gönderilmez.
+
+- Entegra API hata toleransı:
+  - Endpoint isimlerindeki tipolar (`productList`/`porductList`) otomatik handle edilir,
+  - Geçici bağlantı hatalarında retry ve bekleme uygulanır,
+  - API hatalı olduğunda mevcut cache (`entegra_products.parquet`) ile çalışmaya devam edebilir.
+
+- Esnek alarm eşikleri:
+  - ABC sınıfına göre farklı gün eşikleri,
+  - Bu eşikler `config.py` üzerinden kolayca değiştirilebilir; dashboard ve notifier otomatik uyum sağlar.
+
+- Varsayımlar işaretlemesi:
+  - Lead time gibi bilinmeyen parametreler 7 gün varsayımına dayanır,
+  - Tüm bu varsayımlar kodda `# VARSAYIM:` etiketiyle işaretlenmiştir.
+
+- Faz 7 (ileri analizler) için hazır zemin:
+  - Ürün yaşam döngüsü, churned SKU, yeni ürün rampa, tatil etkisi, gün-özel pattern gibi
+    ileri analizler için gerekli temel tablolar ve metrikler halihazırda oluşturulmuş durumda.
+
+
+======================================================================
+7) MEVCUT DURUM ÖZETİ (PROGRESS.MD’YE GÖRE)
+======================================================================
+
+- Tamamlanan fazlar:
+  - Faz 1 — Veri Hazırlık & Master Tablo ✅
+  - Faz 2 — Tahmin & Değerlendirme ✅
+  - Faz 3 — Satın Alma & Anomali ✅
+  - Faz 4 — Birlikte Satış ✅
+  - Faz 5 — Dashboard ✅
+  - Faz 6 — Entegra Entegrasyonu, Zenginleştirme & Alarm Sistemi ✅
+
+- Aktif / sıradaki faz:
+  - Faz 7 — İleri Analizler (opsiyonel)
+    - Ürün yaşam döngüsü, churned SKU, yeni ürün rampa, tatil etkisi,
+      gün-özel pattern gibi ek içgörüler planlanabilir.
+
+Bu dosya, sistemin “kuşbakışı” fotoğrafı olarak tasarlanmıştır.
+Güncel teknik detaylar için `README.md`, iş kuralları ve karar mantıkları için `AGENTS.md`
+ve faz bazlı ilerleme için `PROGRESS.md` dosyalarına bakılmalıdır.
+

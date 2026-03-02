@@ -237,7 +237,11 @@ def eposta_gonder(alarms: pd.DataFrame, konu_ek: str = "") -> bool:
 
 # ─── Ortak bildirim gönderici ─────────────────────────────────────────────────
 
-def bildir(alarms: pd.DataFrame, ozet_mi: bool = False) -> None:
+def bildir(
+    alarms: pd.DataFrame,
+    ozet_mi: bool = False,
+    yalnizca_son_guncellenen: bool = False,
+) -> None:
     """
     Hem Telegram hem e-posta bildirimlerini gönderir.
     scheduler.py tarafından çağrılır.
@@ -246,17 +250,36 @@ def bildir(alarms: pd.DataFrame, ozet_mi: bool = False) -> None:
         alarms: T8 alarm tablosu.
         ozet_mi: True → özet mod (günlük sabah özeti).
     """
-    if alarms.empty:
-        log.info("Bildirim: alarm tablosu boş, gönderim yok.")
+    df = alarms.copy()
+
+    # Son güncellenenler filtresi (stok güncellemesi olan ürünler)
+    if yalnizca_son_guncellenen and "son_guncelleme" in df.columns:
+        try:
+            ts = pd.to_datetime(df["son_guncelleme"], errors="coerce")
+            if ts.notna().any():
+                bugun = pd.Timestamp.now().normalize()
+                df = df[ts.dt.normalize() == bugun]
+                log.info(
+                    "Bildirim: son güncellenenler filtresi aktif. Toplam=%d, bugun=%d",
+                    len(alarms),
+                    len(df),
+                )
+        except Exception as exc:
+            log.warning("Son güncellenenler filtresi uygulanamadı: %s", exc)
+
+    if df.empty:
+        log.info("Bildirim: filtrelenmiş alarm tablosu boş, gönderim yok.")
         return
 
     if ozet_mi:
-        telegram_ozet_gonder(alarms)
-        eposta_gonder(alarms, konu_ek="(Günlük Özet)")
+        # Günlük özet: tüm tabloyu kullan (yalnızca son güncellenenler değil)
+        telegram_ozet_gonder(df)
+        eposta_gonder(df, konu_ek="(Günlük Özet)")
     else:
-        n = telegram_gonder(alarms)
+        # Anlık kritik alarmlar: filtrelenmiş tablo üzerinden gönder
+        n = telegram_gonder(df)
         if n > 0:
-            eposta_gonder(alarms, konu_ek="(Anlık Kritik)")
+            eposta_gonder(df, konu_ek="(Anlık Kritik)")
 
 
 if __name__ == "__main__":

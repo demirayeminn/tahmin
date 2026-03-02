@@ -75,7 +75,13 @@ def _calistir(ozet_mi: bool = False) -> None:
     if alarmlar is not None and not alarmlar.empty:
         try:
             from src.notifier import bildir
-            bildir(alarmlar, ozet_mi=ozet_mi)
+            # Anlık çalışmalarda sadece son güncellenen stokları bildir,
+            # günlük özetlerde ise tüm tabloyu kullan.
+            bildir(
+                alarmlar,
+                ozet_mi=ozet_mi,
+                yalnizca_son_guncellenen=not ozet_mi,
+            )
         except Exception as exc:
             log.error("Bildirim başarısız: %s", exc)
 
