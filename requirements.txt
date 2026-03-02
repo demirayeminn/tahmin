@@ -1,0 +1,16 @@
+pandas>=2.0
+numpy
+openpyxl
+xlsxwriter
+scipy
+statsmodels>=0.14
+scikit-learn
+mlxtend>=0.24
+streamlit>=1.30
+plotly>=5.0
+joblib
+pyarrow
+requests
+python-dotenv
+schedule
+python-telegram-bot>=20.0
