@@ -98,6 +98,11 @@ ENTEGRA_PRODUCTS_PARQUET = DATA_PROCESSED_DIR / "entegra_products.parquet"
 ALARMS_PARQUET = DATA_PROCESSED_DIR / "alarms.parquet"
 FAZ6_EXCEL = DATA_OUTPUTS_DIR / "faz6_alarm_raporu.xlsx"
 STOCK_HISTORY_PARQUET = DATA_PROCESSED_DIR / "stock_history.parquet"
+ANOMALY_EVENTS_PARQUET = DATA_PROCESSED_DIR / "anomaly_events.parquet"
+ANOMALY_CALENDAR_PARQUET = DATA_PROCESSED_DIR / "anomaly_calendar.parquet"
+LIFECYCLE_ANALYSIS_PARQUET = DATA_PROCESSED_DIR / "lifecycle_analysis.parquet"
+WEEKDAY_PATTERN_PARQUET = DATA_PROCESSED_DIR / "weekday_pattern.parquet"
+HOLIDAY_IMPACT_PARQUET = DATA_PROCESSED_DIR / "holiday_impact.parquet"
 
 # ─── Entegra API ──────────────────────────────────────────────────────────────
 ENTEGRA_BASE_URL: str = "https://apiv2.entegrabilisim.com"
@@ -134,3 +139,23 @@ ALERT_EMAIL_TO: str = os.getenv("ALERT_EMAIL_TO", "")
 # ─── Loglama ──────────────────────────────────────────────────────────────────
 LOG_LEVEL: str = "INFO"
 LOG_FORMAT: str = "%(asctime)s [%(levelname)s] %(name)s — %(message)s"
+
+# ─── Faz 7: İleri analiz parametreleri ─────────────────────────────────────
+CHURN_GUN_ESIK: int = 30
+LIFECYCLE_YENI_GUN: int = 30
+LIFECYCLE_DUSUS_ORAN: float = 0.80
+LIFECYCLE_BUYUME_ORAN: float = 1.20
+RAMPA_ILK_GUN: int = 30
+RAMPA_HIZLI_ESIK: float = 1.20
+RAMPA_YAVAS_ESIK: float = 0.80
+
+# VARSAYIM: Resmi tatil listesi manuel tanımlı; yıl bazında güncellenmelidir.
+RESMI_TATIL_AY_GUN: list[str] = [
+    "01-01",  # Yılbaşı
+    "04-23",  # Ulusal Egemenlik ve Çocuk Bayramı
+    "05-01",  # Emek ve Dayanışma Günü
+    "05-19",  # Atatürk'ü Anma Gençlik ve Spor Bayramı
+    "07-15",  # Demokrasi ve Milli Birlik Günü
+    "08-30",  # Zafer Bayramı
+    "10-29",  # Cumhuriyet Bayramı
+]

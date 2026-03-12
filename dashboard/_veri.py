@@ -68,6 +68,36 @@ def alarms() -> pd.DataFrame:
     return pd.DataFrame()
 
 
+
+
+@st.cache_data
+def lifecycle() -> pd.DataFrame:
+    p = DATA_PROCESSED_DIR / "lifecycle_analysis.parquet"
+    if p.exists():
+        df = pd.read_parquet(p)
+        for col in ["ilk_satis_tarihi", "son_satis_tarihi"]:
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col])
+        return df
+    return pd.DataFrame()
+
+
+@st.cache_data
+def weekday_pattern() -> pd.DataFrame:
+    p = DATA_PROCESSED_DIR / "weekday_pattern.parquet"
+    if p.exists():
+        return pd.read_parquet(p)
+    return pd.DataFrame()
+
+
+@st.cache_data
+def holiday_impact() -> pd.DataFrame:
+    p = DATA_PROCESSED_DIR / "holiday_impact.parquet"
+    if p.exists():
+        return pd.read_parquet(p)
+    return pd.DataFrame()
+
+
 @st.cache_data(ttl=300)
 def stock_history() -> pd.DataFrame:
     """Birikimli stok geçmişi (her Entegra çekiminde bir snapshot)."""
