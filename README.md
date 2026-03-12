@@ -41,6 +41,7 @@ python -m src.forecasting
 python -m src.reorder
 python -m src.anomaly
 python -m src.basket_analysis
+python -m src.advanced_analytics
 
 # 4. Entegra API'den canlı stok çek + alarm oluştur
 python -m src.scheduler --once
@@ -111,7 +112,8 @@ Ev-tahmin/
 │       ├── 03_birlikte_satis.py
 │       ├── 04_stok_planlama.py
 │       ├── 05_anomali.py
-│       └── 06_alarm.py          <- Canlı Alarm Ekranı (YENİ)
+│       ├── 06_alarm.py          <- Canlı Alarm Ekranı
+│       └── 07_ileri_analiz.py    <- Faz 7 İleri Analiz
 ├── data/
 │   ├── processed/
 │   └── outputs/
@@ -194,6 +196,16 @@ python -m src.basket_analysis
 
 FP-Growth, support/confidence/lift, aksiyon önerisi.  
 **Çıktı:** `basket_rules.parquet`, `faz4_birlikte_satis.xlsx`
+
+
+### Adım 7 — İleri Analizler (Lifecycle / Churn / Rampa / Tatil)
+
+```bash
+python -m src.advanced_analytics
+```
+
+Faz 7 için yaşam döngüsü, churned SKU, gün-özel pattern ve tatil etkisi tablolarını üretir.
+**Çıktı:** `lifecycle_analysis.parquet`, `weekday_pattern.parquet`, `holiday_impact.parquet`
 
 ---
 
