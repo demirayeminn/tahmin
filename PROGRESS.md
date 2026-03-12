@@ -9,6 +9,7 @@
 
 Okunacak: REF-11
 Kapsam: ürün yaşam döngüsü, churned SKU, yeni ürün rampa, tatil etkisi, gün-özel pattern
+Durum: uygulandı (kod tarafı tamamlandı, veri üretimi komut ile çalıştırılacak)
 
 ---
 
@@ -76,3 +77,15 @@ Tespitler:
 ### Faz 7 — İleri Analizler (opsiyonel)
 Okunacak: REF-11
 Kapsam: ürün yaşam döngüsü, churned SKU, yeni ürün rampa, tatil etkisi, gün-özel pattern
+
+### Faz 7 — İleri Analizler ✅
+Üretilen dosyalar:
+- `src/advanced_analytics.py`
+- `dashboard/pages/07_ileri_analiz.py`
+- `dashboard/_veri.py` güncellendi (lifecycle/weekday/holiday loader)
+- `src/config.py` güncellendi (Faz 7 sabitleri + parquet yolları)
+
+Beklenen çıktılar (çalıştırınca):
+- `data/processed/lifecycle_analysis.parquet`
+- `data/processed/weekday_pattern.parquet`
+- `data/processed/holiday_impact.parquet`
